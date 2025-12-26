@@ -13,7 +13,7 @@ mod sync;
 mod webhook;
 
 use config::AppConfig;
-use notion::NotionClient;
+use notion::{DataSourceInfo, NotionClient};
 use storage::init_opendal;
 use webhook::handle_webhook;
 
@@ -32,6 +32,7 @@ pub struct DatabaseState {
     pub name: String,
     pub id: String,
     pub op: opendal::Operator,
+    pub data_sources: Vec<DataSourceInfo>,
 }
 
 #[tokio::main]
@@ -47,10 +48,12 @@ async fn main() -> Result<()> {
     let mut databases = Vec::new();
     for (name, db) in &config.database {
         let op = init_opendal(&db.backend)?;
+        let data_sources = notion.fetch_database_data_sources(&db.id).await?;
         databases.push(DatabaseState {
             name: name.clone(),
             id: db.id.clone(),
             op,
+            data_sources,
         });
     }
 

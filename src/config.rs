@@ -16,7 +16,7 @@ pub struct AppConfig {
     pub database: BTreeMap<String, DatabaseConfig>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct NotionConfig {
     pub api_key: String,
 }
@@ -74,14 +74,6 @@ fn value_to_string(value: &Value) -> Option<String> {
         Value::Number(value) => Some(value.to_string()),
         Value::Bool(value) => Some(value.to_string()),
         _ => None,
-    }
-}
-
-impl Default for NotionConfig {
-    fn default() -> Self {
-        Self {
-            api_key: String::new(),
-        }
     }
 }
 

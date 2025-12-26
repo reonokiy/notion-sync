@@ -66,11 +66,23 @@ pub async fn handle_webhook(
         return StatusCode::OK.into_response();
     }
 
+    if let Some(data_source_id) = extract_data_source_id(&payload) {
+        let database = state.databases.iter().find(|db| {
+            db.data_sources.iter().any(|ds| ds.id == data_source_id)
+        });
+        let Some(database) = database else {
+            info!("data source {} not configured, skipping", data_source_id);
+            return StatusCode::OK.into_response();
+        };
+        if let Err(err) = crate::sync::sync_data_source(&state, database, &data_source_id).await {
+            error!(?err, "failed to sync data source");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+        return StatusCode::OK.into_response();
+    }
+
     if let Some(database_id) = extract_database_id(&payload) {
-        let database = state
-            .databases
-            .iter()
-            .find(|db| db.id == database_id);
+        let database = state.databases.iter().find(|db| db.id == database_id);
         let Some(database) = database else {
             info!("database {} not configured, skipping", database_id);
             return StatusCode::OK.into_response();
@@ -112,6 +124,26 @@ fn extract_database_id(payload: &Value) -> Option<String> {
                 .get("data")
                 .and_then(|data| data.get("parent"))
                 .and_then(|parent| parent.get("database_id"))
+                .and_then(|id| id.as_str())
+                .map(|value| value.to_string())
+        })
+}
+
+fn extract_data_source_id(payload: &Value) -> Option<String> {
+    if let Some(data_source_id) = payload.get("data_source_id").and_then(|v| v.as_str()) {
+        return Some(data_source_id.to_string());
+    }
+
+    payload
+        .get("data")
+        .and_then(|data| data.get("data_source_id"))
+        .and_then(|id| id.as_str())
+        .map(|value| value.to_string())
+        .or_else(|| {
+            payload
+                .get("data")
+                .and_then(|data| data.get("parent"))
+                .and_then(|parent| parent.get("data_source_id"))
                 .and_then(|id| id.as_str())
                 .map(|value| value.to_string())
         })

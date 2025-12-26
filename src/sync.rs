@@ -7,22 +7,26 @@ use crate::render::{render_blocks, BlobRef};
 use crate::{AppState, DatabaseState};
 
 pub async fn sync_page_by_id(state: &AppState, page_id: &str) -> Result<()> {
-    let database_id = state
+    let parent = state
         .notion
-        .get_page_parent_database_id(page_id)
+        .get_page_parent(page_id)
         .await
-        .with_context(|| format!("failed to resolve parent database for {page_id}"))?;
-    let Some(database_id) = database_id else {
-        info!("page {} is not under a database, skipping", page_id);
-        return Ok(());
+        .with_context(|| format!("failed to resolve parent for {page_id}"))?;
+
+    let data_source_id = parent.data_source_id.as_deref();
+    let database = if let Some(data_source_id) = data_source_id {
+        state
+            .databases
+            .iter()
+            .find(|db| db.data_sources.iter().any(|ds| ds.id == data_source_id))
+    } else if let Some(database_id) = parent.database_id.as_deref() {
+        state.databases.iter().find(|db| db.id == database_id)
+    } else {
+        None
     };
 
-    let database = state
-        .databases
-        .iter()
-        .find(|db| db.id == database_id);
     let Some(database) = database else {
-        info!("database {} not configured, skipping", database_id);
+        info!("page {} parent is not configured, skipping", page_id);
         return Ok(());
     };
 
@@ -49,11 +53,22 @@ pub async fn sync_page(state: &AppState, database: &DatabaseState, page_id: &str
 }
 
 pub async fn sync_database(state: &AppState, database: &DatabaseState) -> Result<()> {
+    for data_source in &database.data_sources {
+        sync_data_source(state, database, &data_source.id).await?;
+    }
+    Ok(())
+}
+
+pub async fn sync_data_source(
+    state: &AppState,
+    database: &DatabaseState,
+    data_source_id: &str,
+) -> Result<()> {
     let page_ids = state
         .notion
-        .query_database_page_ids(&database.id)
+        .query_data_source_page_ids(data_source_id)
         .await
-        .with_context(|| format!("failed to query database {}", database.id))?;
+        .with_context(|| format!("failed to query data source {}", data_source_id))?;
     for page_id in page_ids {
         sync_page(state, database, &page_id).await?;
     }

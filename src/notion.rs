@@ -3,7 +3,7 @@ use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use serde::Deserialize;
 use serde_json::json;
 
-const NOTION_VERSION: &str = "2022-06-28";
+const NOTION_VERSION: &str = "2025-09-03";
 
 #[derive(Clone)]
 pub struct NotionClient {
@@ -87,11 +87,21 @@ impl NotionClient {
     }
 
     pub async fn query_database_page_ids(&self, database_id: &str) -> Result<Vec<String>> {
+        let data_sources = self.fetch_database_data_sources(database_id).await?;
+        let mut page_ids = Vec::new();
+        for data_source in data_sources {
+            let mut ids = self.query_data_source_page_ids(&data_source.id).await?;
+            page_ids.append(&mut ids);
+        }
+        Ok(page_ids)
+    }
+
+    pub async fn query_data_source_page_ids(&self, data_source_id: &str) -> Result<Vec<String>> {
         let mut page_ids = Vec::new();
         let mut cursor: Option<String> = None;
 
         loop {
-            let url = format!("https://api.notion.com/v1/databases/{}/query", database_id);
+            let url = format!("https://api.notion.com/v1/data_sources/{}/query", data_source_id);
             let mut body = json!({});
             if let Some(value) = cursor.as_ref() {
                 body["start_cursor"] = json!(value);
@@ -102,7 +112,7 @@ impl NotionClient {
                 let body = response.text().await.unwrap_or_default();
                 return Err(anyhow!("Notion API error {status}: {body}"));
             }
-            let data: DatabaseQueryResponse = response.json().await?;
+            let data: DataSourceQueryResponse = response.json().await?;
             page_ids.extend(data.results.into_iter().map(|page| page.id));
             if data.has_more {
                 cursor = data.next_cursor;
@@ -114,7 +124,22 @@ impl NotionClient {
         Ok(page_ids)
     }
 
-    pub async fn get_page_parent_database_id(&self, page_id: &str) -> Result<Option<String>> {
+    pub async fn fetch_database_data_sources(
+        &self,
+        database_id: &str,
+    ) -> Result<Vec<DataSourceInfo>> {
+        let url = format!("https://api.notion.com/v1/databases/{}", database_id);
+        let response = self.client.get(&url).send().await?;
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(anyhow!("Notion API error {status}: {body}"));
+        }
+        let data: DatabaseResponse = response.json().await?;
+        Ok(data.data_sources)
+    }
+
+    pub async fn get_page_parent(&self, page_id: &str) -> Result<PageParent> {
         let url = format!("https://api.notion.com/v1/pages/{}", page_id);
         let response = self.client.get(&url).send().await?;
         let status = response.status();
@@ -123,10 +148,11 @@ impl NotionClient {
             return Err(anyhow!("Notion API error {status}: {body}"));
         }
         let data: PageResponse = response.json().await?;
-        if data.parent.parent_type == "database_id" {
-            return Ok(data.parent.database_id);
-        }
-        Ok(None)
+        Ok(PageParent {
+            parent_type: data.parent.parent_type,
+            database_id: data.parent.database_id,
+            data_source_id: data.parent.data_source_id,
+        })
     }
 }
 
@@ -138,7 +164,7 @@ struct BlocksResponse {
 }
 
 #[derive(Debug, Deserialize)]
-struct DatabaseQueryResponse {
+struct DataSourceQueryResponse {
     results: Vec<PageObject>,
     next_cursor: Option<String>,
     has_more: bool,
@@ -147,6 +173,18 @@ struct DatabaseQueryResponse {
 #[derive(Debug, Deserialize)]
 struct PageObject {
     id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct DatabaseResponse {
+    data_sources: Vec<DataSourceInfo>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct DataSourceInfo {
+    pub id: String,
+    #[serde(default)]
+    pub name: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -159,6 +197,14 @@ struct Parent {
     #[serde(rename = "type")]
     parent_type: String,
     database_id: Option<String>,
+    data_source_id: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct PageParent {
+    pub parent_type: String,
+    pub database_id: Option<String>,
+    pub data_source_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
