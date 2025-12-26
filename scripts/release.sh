@@ -21,6 +21,8 @@ fi
 
 sed -i -E "s/^version = \"[0-9]+\.[0-9]+\.[0-9]+\"/version = \"$version\"/" Cargo.toml
 
+cargo generate-lockfile
+
 git add Cargo.toml Cargo.lock
 
 git commit -m "Release v$version"
