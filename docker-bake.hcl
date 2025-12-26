@@ -7,7 +7,7 @@ variable "REPO" {
 }
 
 variable "TAGS" {
-  default = ["main"]
+  default = "main"
 }
 
 group "default" {
@@ -18,5 +18,5 @@ target "notion-sync" {
   context = "."
   dockerfile = "Dockerfile"
   platforms = ["linux/amd64", "linux/arm64"]
-  tags = formatlist("${REGISTRY}/${REPO}:%s", TAGS)
+  tags = formatlist("${REGISTRY}/${REPO}:%s", split(",", TAGS))
 }
