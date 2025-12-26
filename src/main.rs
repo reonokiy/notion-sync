@@ -3,7 +3,7 @@ use axum::{routing::post, Router};
 use tokio::net::TcpListener;
 use log::info;
 use logforth::append;
-use log::LevelFilter;
+use logforth::record::{Level, LevelFilter};
 
 const DEFAULT_MAX_DEPTH: usize = 3;
 
@@ -89,13 +89,13 @@ async fn main() -> Result<()> {
 }
 
 fn init_logging() {
-    logforth::builder()
+    logforth::starter_log::builder()
         .dispatch(|d| {
-            d.filter(LevelFilter::Error)
+            d.filter(LevelFilter::MoreSevereEqual(Level::Error))
                 .append(append::Stderr::default())
         })
         .dispatch(|d| {
-            d.filter(LevelFilter::Info)
+            d.filter(LevelFilter::MoreSevereEqual(Level::Info))
                 .append(append::Stdout::default())
         })
         .apply();
