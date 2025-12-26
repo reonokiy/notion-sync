@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use axum::{routing::post, Router};
+use axum::{routing::{get, post}, Router};
 use tokio::net::TcpListener;
 use log::info;
 use logforth::append;
@@ -9,6 +9,7 @@ const DEFAULT_MAX_DEPTH: usize = 3;
 
 mod config;
 mod notion;
+mod queue;
 mod render;
 mod storage;
 mod sync;
@@ -16,6 +17,7 @@ mod webhook;
 
 use config::AppConfig;
 use notion::{DataSourceInfo, NotionClient};
+use queue::{enqueue_initial_scan, init_queue, spawn_sync_worker};
 use storage::init_opendal;
 use webhook::handle_webhook;
 
@@ -27,6 +29,7 @@ pub struct AppState {
     pub webhook_max_age_seconds: u64,
     pub databases: Vec<DatabaseState>,
     pub http: reqwest::Client,
+    pub queue: queue::QueueHandle,
 }
 
 #[derive(Clone)]
@@ -44,6 +47,7 @@ async fn main() -> Result<()> {
     let config = AppConfig::load()?;
     let notion = NotionClient::new(&config.notion.api_key)?;
     let http = reqwest::Client::new();
+    let (queue, worker) = init_queue(&config.queue)?;
 
     let mut databases = Vec::new();
     for db in &config.database {
@@ -68,14 +72,18 @@ async fn main() -> Result<()> {
         webhook_max_age_seconds: config.webhook.max_age_seconds,
         databases,
         http,
+        queue: queue.clone(),
     };
 
-    for database in &state.databases {
-        sync::sync_database(&state, database).await?;
-    }
+    spawn_sync_worker(state.clone(), worker, queue.clone());
+    let initial_state = state.clone();
+    tokio::spawn(async move {
+        enqueue_initial_scan(&initial_state).await;
+    });
 
     let app = Router::new()
         .route("/webhook", post(handle_webhook))
+        .route("/health", get(health))
         .with_state(state);
 
     let listen_addr = format!("{}:{}", config.webhook.host, config.webhook.port);
@@ -86,6 +94,10 @@ async fn main() -> Result<()> {
     axum::serve(listener, app).await?;
 
     Ok(())
+}
+
+async fn health() -> &'static str {
+    "ok"
 }
 
 fn init_logging() {

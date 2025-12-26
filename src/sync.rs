@@ -57,29 +57,6 @@ pub async fn sync_page(state: &AppState, database: &DatabaseState, page_id: &str
     Ok(())
 }
 
-pub async fn sync_database(state: &AppState, database: &DatabaseState) -> Result<()> {
-    for data_source in &database.data_sources {
-        sync_data_source(state, database, &data_source.id).await?;
-    }
-    Ok(())
-}
-
-pub async fn sync_data_source(
-    state: &AppState,
-    database: &DatabaseState,
-    data_source_id: &str,
-) -> Result<()> {
-    let page_ids = state
-        .notion
-        .query_data_source_page_ids(data_source_id)
-        .await
-        .with_context(|| format!("failed to query data source {}", data_source_id))?;
-    for page_id in page_ids {
-        sync_page(state, database, &page_id).await?;
-    }
-    Ok(())
-}
-
 async fn sync_blobs(
     state: &AppState,
     database: &DatabaseState,

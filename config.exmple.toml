@@ -7,6 +7,10 @@ port = 3000
 secret = ""
 max_age_seconds = 300
 
+[queue]
+# redis_url = "redis://localhost:6379"
+# name = "notion-sync"
+
 [key_map]
 # "Name" = "title"
 # "Tags" = "tags"

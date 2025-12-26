@@ -12,6 +12,7 @@ use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 use log::{error, info};
 
+use crate::queue::SyncJob;
 use crate::AppState;
 
 pub async fn handle_webhook(
@@ -56,10 +57,10 @@ pub async fn handle_webhook(
     }
 
     if let Some(page_id) = extract_page_id(&payload) {
-        if let Err(err) = crate::sync::sync_page_by_id(&state, &page_id).await {
-            error!("failed to sync page: {err}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
+        let _ = state
+            .queue
+            .enqueue(SyncJob::SyncPageById { page_id })
+            .await;
         return StatusCode::OK.into_response();
     }
 
@@ -71,10 +72,13 @@ pub async fn handle_webhook(
             info!("data source {} not configured, skipping", data_source_id);
             return StatusCode::OK.into_response();
         };
-        if let Err(err) = crate::sync::sync_data_source(&state, database, &data_source_id).await {
-            error!("failed to sync data source: {err}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
+        let _ = state
+            .queue
+            .enqueue(SyncJob::ScanDataSource {
+                database_id: database.id.clone(),
+                data_source_id,
+            })
+            .await;
         return StatusCode::OK.into_response();
     }
 
@@ -84,9 +88,14 @@ pub async fn handle_webhook(
             info!("database {} not configured, skipping", database_id);
             return StatusCode::OK.into_response();
         };
-        if let Err(err) = crate::sync::sync_database(&state, database).await {
-            error!("failed to sync database: {err}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        for data_source in &database.data_sources {
+            let _ = state
+                .queue
+                .enqueue(SyncJob::ScanDataSource {
+                    database_id: database.id.clone(),
+                    data_source_id: data_source.id.clone(),
+                })
+                .await;
         }
         return StatusCode::OK.into_response();
     }
