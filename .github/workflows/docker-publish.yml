@@ -49,12 +49,13 @@ jobs:
       - name: Build and push
         if: steps.vars.outputs.skip != 'true'
         uses: docker/bake-action@v5
+        env:
+          REGISTRY: ghcr.io
+          REPO: ${{ github.repository }}
+          TAGS: ${{ steps.vars.outputs.tag }}${{ steps.vars.outputs.latest && format(',{0}', steps.vars.outputs.latest) || '' }}
         with:
           files: docker-bake.hcl
           set: |
-            REGISTRY=ghcr.io
-            REPO=${{ github.repository }}
-            TAGS=${{ steps.vars.outputs.tag }}${{ steps.vars.outputs.latest && format(',{0}', steps.vars.outputs.latest) || '' }}
             *.cache-from=type=gha
             *.cache-to=type=gha,mode=max
           push: true
