@@ -13,7 +13,7 @@ pub struct AppConfig {
     #[serde(default)]
     pub webhook: WebhookConfig,
     #[serde(default)]
-    pub database: BTreeMap<String, DatabaseConfig>,
+    pub database: Vec<DatabaseConfig>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -48,7 +48,9 @@ impl Default for WebhookConfig {
 pub struct DatabaseConfig {
     pub id: String,
     #[serde(alias = "storage")]
-    pub backend: BackendConfig,
+    pub storage: Vec<BackendConfig>,
+    #[serde(default)]
+    pub key_map: BTreeMap<String, String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -90,6 +92,11 @@ impl AppConfig {
         }
         if config.database.is_empty() {
             return Err(anyhow!("at least one database entry is required"));
+        }
+        for db in &config.database {
+            if db.storage.is_empty() {
+                return Err(anyhow!("database {} is missing storage config", db.id));
+            }
         }
         Ok(config)
     }

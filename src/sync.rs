@@ -1,9 +1,9 @@
 use anyhow::{Context, Result};
 use std::collections::HashSet;
 
-use tracing::info;
+use log::info;
 
-use crate::render::{render_blocks, BlobRef};
+use crate::render::{render_page, BlobRef};
 use crate::{AppState, DatabaseState};
 
 pub async fn sync_page_by_id(state: &AppState, page_id: &str) -> Result<()> {
@@ -34,12 +34,17 @@ pub async fn sync_page_by_id(state: &AppState, page_id: &str) -> Result<()> {
 }
 
 pub async fn sync_page(state: &AppState, database: &DatabaseState, page_id: &str) -> Result<()> {
+    let metadata = state
+        .notion
+        .get_page_metadata(page_id)
+        .await
+        .with_context(|| format!("failed to fetch page metadata for {page_id}"))?;
     let blocks = state
         .notion
         .fetch_blocks(page_id, state.max_depth)
         .await
         .with_context(|| format!("failed to fetch blocks for {page_id}"))?;
-    let rendered = render_blocks(&blocks);
+    let rendered = render_page(&metadata, &blocks, &database.key_map);
     let page_path = format!("pages/{}.md", page_id);
     database
         .op
@@ -48,7 +53,7 @@ pub async fn sync_page(state: &AppState, database: &DatabaseState, page_id: &str
         .with_context(|| format!("failed to write markdown to {page_path}"))?;
 
     sync_blobs(state, database, &rendered.blobs).await?;
-    info!("synced page {} into {}", page_id, database.name);
+    info!("synced page {} into {}", page_id, database.id);
     Ok(())
 }
 

@@ -7,15 +7,25 @@ port = 3000
 secret = ""
 max_age_seconds = 300
 
-[database.db1]
+[key_map]
+# "Name" = "title"
+# "Tags" = "tags"
+# "Published" = "published"
+
+[[database]]
 id = "xxxxxxxxxxxxxxxx"
-[database.db1.storage]
+[[database.storage]]
 type = "fs"
 root = "/tmp/db1"
 
-# [database.db2]
+[database.key_map]
+# "Name" = "title"
+# "Tags" = "tags"
+# "Published" = "published"
+
+# [[database]]
 # id = "yyyyyyyyyyyyyyyy"
-# [database.db2.storage]
+# [[database.storage]]
 # type = "s3"
 # bucket = "your-bucket"
 # region = "us-east-1"

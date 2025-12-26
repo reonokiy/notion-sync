@@ -2,6 +2,7 @@ use anyhow::{anyhow, Result};
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use serde::Deserialize;
 use serde_json::json;
+use std::collections::BTreeMap;
 
 const NOTION_VERSION: &str = "2025-09-03";
 
@@ -154,6 +155,30 @@ impl NotionClient {
             data_source_id: data.parent.data_source_id,
         })
     }
+
+    pub async fn get_page_metadata(&self, page_id: &str) -> Result<PageMetadata> {
+        let url = format!("https://api.notion.com/v1/pages/{}", page_id);
+        let response = self.client.get(&url).send().await?;
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(anyhow!("Notion API error {status}: {body}"));
+        }
+        let data: PageResponse = response.json().await?;
+        Ok(PageMetadata {
+            id: data.id,
+            url: data.url,
+            created_time: data.created_time,
+            last_edited_time: data.last_edited_time,
+            title: extract_page_title(&data.properties),
+            parent: PageParent {
+                parent_type: data.parent.parent_type,
+                database_id: data.parent.database_id,
+                data_source_id: data.parent.data_source_id,
+            },
+            properties: extract_page_properties(&data.properties),
+        })
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -189,6 +214,11 @@ pub struct DataSourceInfo {
 
 #[derive(Debug, Deserialize)]
 struct PageResponse {
+    id: String,
+    url: String,
+    created_time: String,
+    last_edited_time: String,
+    properties: serde_json::Value,
     parent: Parent,
 }
 
@@ -200,11 +230,374 @@ struct Parent {
     data_source_id: Option<String>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PageParent {
     pub parent_type: String,
     pub database_id: Option<String>,
     pub data_source_id: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PageMetadata {
+    pub id: String,
+    pub url: String,
+    pub created_time: String,
+    pub last_edited_time: String,
+    pub title: Option<String>,
+    pub parent: PageParent,
+    pub properties: BTreeMap<String, PropertyValue>,
+}
+
+fn extract_page_title(properties: &serde_json::Value) -> Option<String> {
+    let obj = properties.as_object()?;
+    for value in obj.values() {
+        let prop_type = value.get("type")?.as_str()?;
+        if prop_type == "title" {
+            let title = value.get("title")?.as_array()?;
+            let mut out = String::new();
+            for part in title {
+                if let Some(text) = part.get("plain_text").and_then(|v| v.as_str()) {
+                    out.push_str(text);
+                }
+            }
+            if !out.is_empty() {
+                return Some(out);
+            }
+        }
+    }
+    None
+}
+
+#[derive(Debug, Clone)]
+pub enum PropertyValue {
+    Text(String),
+    List(Vec<String>),
+}
+
+fn extract_page_properties(properties: &serde_json::Value) -> BTreeMap<String, PropertyValue> {
+    let mut out = BTreeMap::new();
+    let Some(obj) = properties.as_object() else {
+        return out;
+    };
+
+    for (name, prop) in obj {
+        let prop_type = prop.get("type").and_then(|v| v.as_str()).unwrap_or("");
+        let value = match prop_type {
+            "title" => extract_text_value(prop.get("title")),
+            "rich_text" => extract_text_value(prop.get("rich_text")),
+            "select" => prop
+                .get("select")
+                .and_then(|v| v.get("name"))
+                .and_then(|v| v.as_str())
+                .map(|v| PropertyValue::Text(v.to_string())),
+            "multi_select" => prop
+                .get("multi_select")
+                .and_then(|v| v.as_array())
+                .map(|values| {
+                    PropertyValue::List(
+                        values
+                            .iter()
+                            .filter_map(|item| item.get("name").and_then(|v| v.as_str()))
+                            .map(|v| v.to_string())
+                            .collect(),
+                    )
+                }),
+            "status" => prop
+                .get("status")
+                .and_then(|v| v.get("name"))
+                .and_then(|v| v.as_str())
+                .map(|v| PropertyValue::Text(v.to_string())),
+            "number" => prop
+                .get("number")
+                .and_then(|v| v.as_f64())
+                .map(|v| PropertyValue::Text(v.to_string())),
+            "checkbox" => prop
+                .get("checkbox")
+                .and_then(|v| v.as_bool())
+                .map(|v| PropertyValue::Text(v.to_string())),
+            "date" => prop
+                .get("date")
+                .and_then(extract_date_value)
+                .map(PropertyValue::Text),
+            "people" => prop
+                .get("people")
+                .and_then(|v| v.as_array())
+                .map(|values| {
+                    PropertyValue::List(
+                        values
+                            .iter()
+                            .filter_map(|item| {
+                                item.get("name")
+                                    .and_then(|v| v.as_str())
+                                    .or_else(|| item.get("id").and_then(|v| v.as_str()))
+                            })
+                            .map(|v| v.to_string())
+                            .collect(),
+                    )
+                }),
+            "files" => prop
+                .get("files")
+                .and_then(|v| v.as_array())
+                .map(|values| {
+                    PropertyValue::List(
+                        values
+                            .iter()
+                            .filter_map(|item| {
+                                item.get("name")
+                                    .and_then(|v| v.as_str())
+                                    .or_else(|| {
+                                        item.get("file")
+                                            .and_then(|f| f.get("url"))
+                                            .and_then(|v| v.as_str())
+                                    })
+                                    .or_else(|| {
+                                        item.get("external")
+                                            .and_then(|f| f.get("url"))
+                                            .and_then(|v| v.as_str())
+                                    })
+                            })
+                            .map(|v| v.to_string())
+                            .collect(),
+                    )
+                }),
+            "relation" => prop
+                .get("relation")
+                .and_then(|v| v.as_array())
+                .map(|values| {
+                    PropertyValue::List(
+                        values
+                            .iter()
+                            .filter_map(|item| item.get("id").and_then(|v| v.as_str()))
+                            .map(|v| v.to_string())
+                            .collect(),
+                    )
+                }),
+            "url" => prop
+                .get("url")
+                .and_then(|v| v.as_str())
+                .map(|v| PropertyValue::Text(v.to_string())),
+            "email" => prop
+                .get("email")
+                .and_then(|v| v.as_str())
+                .map(|v| PropertyValue::Text(v.to_string())),
+            "phone_number" => prop
+                .get("phone_number")
+                .and_then(|v| v.as_str())
+                .map(|v| PropertyValue::Text(v.to_string())),
+            "created_time" => prop
+                .get("created_time")
+                .and_then(|v| v.as_str())
+                .map(|v| PropertyValue::Text(v.to_string())),
+            "last_edited_time" => prop
+                .get("last_edited_time")
+                .and_then(|v| v.as_str())
+                .map(|v| PropertyValue::Text(v.to_string())),
+            "created_by" => prop
+                .get("created_by")
+                .and_then(|v| v.get("name").or_else(|| v.get("id")))
+                .and_then(|v| v.as_str())
+                .map(|v| PropertyValue::Text(v.to_string())),
+            "last_edited_by" => prop
+                .get("last_edited_by")
+                .and_then(|v| v.get("name").or_else(|| v.get("id")))
+                .and_then(|v| v.as_str())
+                .map(|v| PropertyValue::Text(v.to_string())),
+            "formula" => prop.get("formula").and_then(extract_formula_value),
+            "rollup" => prop.get("rollup").and_then(extract_rollup_value),
+            "unique_id" => prop
+                .get("unique_id")
+                .and_then(|v| {
+                    let number = v.get("number")?.as_i64()?;
+                    let prefix = v.get("prefix").and_then(|p| p.as_str()).unwrap_or("");
+                    Some(PropertyValue::Text(format!("{}{}", prefix, number)))
+                }),
+            _ => prop.get(prop_type).and_then(value_to_property_value),
+        };
+
+        if let Some(value) = value {
+            out.insert(name.clone(), value);
+        }
+    }
+
+    out
+}
+
+fn extract_text_value(value: Option<&serde_json::Value>) -> Option<PropertyValue> {
+    let value = value?;
+    let arr = value.as_array()?;
+    let mut out = String::new();
+    for part in arr {
+        if let Some(text) = part.get("plain_text").and_then(|v| v.as_str()) {
+            out.push_str(text);
+        }
+    }
+    Some(PropertyValue::Text(out))
+}
+
+fn extract_date_value(value: &serde_json::Value) -> Option<String> {
+    let start = value.get("start")?.as_str()?;
+    let end = value.get("end").and_then(|v| v.as_str());
+    let tz = value.get("time_zone").and_then(|v| v.as_str());
+    let mut out = start.to_string();
+    if let Some(end) = end {
+        out.push_str("..");
+        out.push_str(end);
+    }
+    if let Some(tz) = tz {
+        out.push(' ');
+        out.push_str(tz);
+    }
+    Some(out)
+}
+
+fn extract_formula_value(value: &serde_json::Value) -> Option<PropertyValue> {
+    let prop_type = value.get("type").and_then(|v| v.as_str())?;
+    match prop_type {
+        "string" => value
+            .get("string")
+            .and_then(|v| v.as_str())
+            .map(|v| PropertyValue::Text(v.to_string())),
+        "number" => value
+            .get("number")
+            .and_then(|v| v.as_f64())
+            .map(|v| PropertyValue::Text(v.to_string())),
+        "boolean" => value
+            .get("boolean")
+            .and_then(|v| v.as_bool())
+            .map(|v| PropertyValue::Text(v.to_string())),
+        "date" => value
+            .get("date")
+            .and_then(extract_date_value)
+            .map(PropertyValue::Text),
+        _ => None,
+    }
+}
+
+fn extract_rollup_value(value: &serde_json::Value) -> Option<PropertyValue> {
+    let prop_type = value.get("type").and_then(|v| v.as_str())?;
+    match prop_type {
+        "array" => value
+            .get("array")
+            .and_then(|v| v.as_array())
+            .map(|items| PropertyValue::List(items.iter().filter_map(rollup_item_to_string).collect())),
+        "number" => value
+            .get("number")
+            .and_then(|v| v.as_f64())
+            .map(|v| PropertyValue::Text(v.to_string())),
+        "date" => value
+            .get("date")
+            .and_then(extract_date_value)
+            .map(PropertyValue::Text),
+        _ => None,
+    }
+}
+
+fn rollup_item_to_string(value: &serde_json::Value) -> Option<String> {
+    let prop_type = value.get("type").and_then(|v| v.as_str())?;
+    match prop_type {
+        "title" | "rich_text" => {
+            extract_text_value(value.get(prop_type)).and_then(|v| match v {
+                PropertyValue::Text(text) => Some(text),
+                _ => None,
+            })
+        }
+        "select" | "status" => value
+            .get(prop_type)
+            .and_then(|v| v.get("name"))
+            .and_then(|v| v.as_str())
+            .map(|v| v.to_string()),
+        "multi_select" => value
+            .get("multi_select")
+            .and_then(|v| v.as_array())
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(|item| item.get("name").and_then(|v| v.as_str()))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            }),
+        "number" => value
+            .get("number")
+            .and_then(|v| v.as_f64())
+            .map(|v| v.to_string()),
+        "checkbox" => value
+            .get("checkbox")
+            .and_then(|v| v.as_bool())
+            .map(|v| v.to_string()),
+        "date" => value.get("date").and_then(extract_date_value),
+        "url" | "email" | "phone_number" => value
+            .get(prop_type)
+            .and_then(|v| v.as_str())
+            .map(|v| v.to_string()),
+        "created_time" | "last_edited_time" => value
+            .get(prop_type)
+            .and_then(|v| v.as_str())
+            .map(|v| v.to_string()),
+        "people" => value
+            .get("people")
+            .and_then(|v| v.as_array())
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(|item| {
+                        item.get("name")
+                            .and_then(|v| v.as_str())
+                            .or_else(|| item.get("id").and_then(|v| v.as_str()))
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            }),
+        "files" => value
+            .get("files")
+            .and_then(|v| v.as_array())
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(|item| item.get("name").and_then(|v| v.as_str()))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            }),
+        "relation" => value
+            .get("relation")
+            .and_then(|v| v.as_array())
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(|item| item.get("id").and_then(|v| v.as_str()))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            }),
+        "formula" => value
+            .get("formula")
+            .and_then(extract_formula_value)
+            .map(|v| match v {
+                PropertyValue::Text(text) => text,
+                PropertyValue::List(list) => list.join(", "),
+            }),
+        _ => value_to_string(value),
+    }
+}
+
+fn value_to_property_value(value: &serde_json::Value) -> Option<PropertyValue> {
+    match value {
+        serde_json::Value::String(value) => Some(PropertyValue::Text(value.clone())),
+        serde_json::Value::Number(value) => Some(PropertyValue::Text(value.to_string())),
+        serde_json::Value::Bool(value) => Some(PropertyValue::Text(value.to_string())),
+        serde_json::Value::Array(values) => {
+            Some(PropertyValue::List(values.iter().filter_map(value_to_string).collect()))
+        }
+        _ => value_to_string(value).map(PropertyValue::Text),
+    }
+}
+
+fn value_to_string(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(value) => Some(value.clone()),
+        serde_json::Value::Number(value) => Some(value.to_string()),
+        serde_json::Value::Bool(value) => Some(value.to_string()),
+        serde_json::Value::Null => None,
+        _ => Some(value.to_string()),
+    }
 }
 
 #[derive(Debug, Deserialize)]

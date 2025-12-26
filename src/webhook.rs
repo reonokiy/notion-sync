@@ -10,7 +10,7 @@ use serde_json::{json, Value};
 use sha2::Sha256;
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
-use tracing::{error, info};
+use log::{error, info};
 
 use crate::AppState;
 
@@ -22,7 +22,7 @@ pub async fn handle_webhook(
     let payload: Value = match serde_json::from_slice(&body) {
         Ok(payload) => payload,
         Err(err) => {
-            error!(?err, "failed to parse webhook payload");
+            error!("failed to parse webhook payload: {err}");
             return StatusCode::BAD_REQUEST.into_response();
         }
     };
@@ -31,14 +31,14 @@ pub async fn handle_webhook(
         .get("verification_token")
         .and_then(|value| value.as_str())
     {
-        info!(verification_token, "received notion verification token");
+        info!("received notion verification token: {}", verification_token);
         return (StatusCode::OK, Json(json!({ "ok": true }))).into_response();
     }
 
     if let Some(secret) = state.webhook_secret.as_deref()
         && let Err(err) = verify_signature(&headers, &body, secret)
     {
-        error!(?err, "webhook signature verification failed");
+        error!("webhook signature verification failed: {err}");
         return StatusCode::UNAUTHORIZED.into_response();
     }
 
@@ -50,17 +50,14 @@ pub async fn handle_webhook(
             event_time - now
         };
         if age.as_seconds_f64() > state.webhook_max_age_seconds as f64 {
-            info!(
-                event_time = event_time.to_string(),
-                "dropping stale webhook event"
-            );
+            info!("dropping stale webhook event: {}", event_time);
             return StatusCode::OK.into_response();
         }
     }
 
     if let Some(page_id) = extract_page_id(&payload) {
         if let Err(err) = crate::sync::sync_page_by_id(&state, &page_id).await {
-            error!(?err, "failed to sync page");
+            error!("failed to sync page: {err}");
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
         return StatusCode::OK.into_response();
@@ -75,7 +72,7 @@ pub async fn handle_webhook(
             return StatusCode::OK.into_response();
         };
         if let Err(err) = crate::sync::sync_data_source(&state, database, &data_source_id).await {
-            error!(?err, "failed to sync data source");
+            error!("failed to sync data source: {err}");
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
         return StatusCode::OK.into_response();
@@ -88,7 +85,7 @@ pub async fn handle_webhook(
             return StatusCode::OK.into_response();
         };
         if let Err(err) = crate::sync::sync_database(&state, database).await {
-            error!(?err, "failed to sync database");
+            error!("failed to sync database: {err}");
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
         return StatusCode::OK.into_response();

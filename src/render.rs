@@ -1,4 +1,5 @@
-use crate::notion::{Block, FileContainer, RichText, RichTextContainer};
+use crate::notion::{Block, FileContainer, PageMetadata, PropertyValue, RichText, RichTextContainer};
+use std::collections::BTreeMap;
 
 pub struct Rendered {
     pub markdown: String,
@@ -11,11 +12,46 @@ pub struct BlobRef {
     pub url: String,
 }
 
-pub fn render_blocks(blocks: &[Block]) -> Rendered {
+pub fn render_page(
+    metadata: &PageMetadata,
+    blocks: &[Block],
+    key_map: &BTreeMap<String, String>,
+) -> Rendered {
     let mut out = String::new();
     let mut numbering = 1usize;
     let mut table_state: Option<TableState> = None;
     let mut blobs: Vec<BlobRef> = Vec::new();
+
+    out.push_str("---\n");
+    for (key, value) in &metadata.properties {
+        let mapped_key = key_map.get(key).map(|v| v.as_str()).unwrap_or(key);
+        if mapped_key.is_empty() {
+            continue;
+        }
+        out.push('"');
+        out.push_str(&escape_yaml(mapped_key));
+        out.push_str("\": ");
+        match value {
+            PropertyValue::Text(value) => {
+                out.push('"');
+                out.push_str(&escape_yaml(value));
+                out.push_str("\"\n");
+            }
+            PropertyValue::List(values) => {
+                out.push('[');
+                for (index, item) in values.iter().enumerate() {
+                    if index > 0 {
+                        out.push_str(", ");
+                    }
+                    out.push('"');
+                    out.push_str(&escape_yaml(item));
+                    out.push('"');
+                }
+                out.push_str("]\n");
+            }
+        }
+    }
+    out.push_str("---\n\n");
 
     for block in blocks {
         if table_state.is_some()
@@ -359,6 +395,10 @@ fn extract_extension_from_url(url: &str) -> Option<String> {
 
 fn format_blob_link(path: &str) -> String {
     format!("../{}", path)
+}
+
+fn escape_yaml(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 fn flush_table(out: &mut String, state: Option<TableState>) {
