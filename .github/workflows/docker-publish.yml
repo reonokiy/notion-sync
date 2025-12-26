@@ -52,7 +52,9 @@ jobs:
         with:
           files: docker-bake.hcl
           set: |
-            *.tags=ghcr.io/${{ github.repository }}:${{ steps.vars.outputs.tag }}${{ steps.vars.outputs.latest && format(',ghcr.io/{0}:{1}', github.repository, steps.vars.outputs.latest) || '' }}
+            REGISTRY=ghcr.io
+            REPO=${{ github.repository }}
+            TAGS=${{ steps.vars.outputs.tag }}${{ steps.vars.outputs.latest && format(',{0}', steps.vars.outputs.latest) || '' }}
             *.cache-from=type=gha
             *.cache-to=type=gha,mode=max
           push: true
