@@ -33,8 +33,8 @@ git tag "v$version"
 
 if [ "${1:-}" = "--push" ]; then
   git push origin HEAD
-  git push origin "v$version"
-  git push origin "v$version" --tags
+  git push origin refs/tags/v$version
+  git push origin refs/heads/v$version
 fi
 
 cat <<MSG
