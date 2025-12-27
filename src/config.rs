@@ -101,6 +101,9 @@ fn value_to_string(value: &Value) -> Option<String> {
 impl AppConfig {
     pub fn load() -> Result<Self> {
         let figment = Figment::from(Serialized::defaults(AppConfig::default()))
+            .merge(Toml::file("/etc/notion-sync/config.toml"))
+            .merge(Yaml::file("/etc/notion-sync/config.yaml"))
+            .merge(Yaml::file("/etc/notion-sync/config.yml"))
             .merge(Toml::file("config.toml"))
             .merge(Yaml::file("config.yaml"))
             .merge(Yaml::file("config.yml"))

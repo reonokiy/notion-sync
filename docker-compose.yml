@@ -1,0 +1,6 @@
+services:
+  notion-sync:
+    build:
+      context: .
+    volumes:
+      - ./config.toml:/etc/notion-sync/config.toml:ro

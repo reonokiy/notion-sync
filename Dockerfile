@@ -12,7 +12,7 @@ RUN cargo build --release
 FROM gcr.io/distroless/cc-debian12
 
 WORKDIR /app
-COPY --from=builder /app/target/release/notion-sync ./notion-sync
+COPY --from=builder /app/target/release/notion-sync /app/notion-sync
 
 EXPOSE 3000
 
