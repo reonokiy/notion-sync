@@ -43,11 +43,14 @@ pub struct DatabaseState {
 #[tokio::main]
 async fn main() -> Result<()> {
     init_logging();
+    info!("logging initialized");
 
     let config = AppConfig::load()?;
+    info!("configuration loaded");
     let notion = NotionClient::new(&config.notion.api_key)?;
     let http = reqwest::Client::new();
     let (queue, worker) = init_queue(&config.queue)?;
+    info!("queue initialized");
 
     let mut databases = Vec::new();
     for db in &config.database {
@@ -64,6 +67,7 @@ async fn main() -> Result<()> {
             key_map: db.key_map.clone(),
         });
     }
+    info!("databases initialized");
 
     let state = AppState {
         notion,
@@ -76,10 +80,12 @@ async fn main() -> Result<()> {
     };
 
     spawn_sync_worker(state.clone(), worker, queue.clone());
+    info!("sync worker spawned");
     let initial_state = state.clone();
     tokio::spawn(async move {
         enqueue_initial_scan(&initial_state).await;
     });
+    info!("initial scan enqueued");
 
     let app = Router::new()
         .route("/webhook", post(handle_webhook))
