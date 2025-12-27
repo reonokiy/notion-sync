@@ -12,25 +12,13 @@ permissions:
   packages: write
 
 jobs:
-  docker:
+  meta:
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.vars.outputs.tag }}
+      latest: ${{ steps.vars.outputs.latest }}
+      skip: ${{ steps.vars.outputs.skip }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Compute image tag
         id: vars
         run: |
@@ -46,16 +34,88 @@ jobs:
           fi
           echo "skip=true" >> "$GITHUB_OUTPUT"
 
-      - name: Build and push
-        if: steps.vars.outputs.skip != 'true'
-        uses: docker/bake-action@v5
+  build:
+    needs: meta
+    if: needs.meta.outputs.skip != 'true'
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            arch: amd64
+            platform: linux/amd64
+          - os: ubuntu-24.04-arm
+            arch: arm64
+            platform: linux/arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image tags
+        id: tags
         env:
           REGISTRY: ghcr.io
           REPO: ${{ github.repository }}
-          TAGS: ${{ steps.vars.outputs.tag }}${{ steps.vars.outputs.latest && format(',{0}', steps.vars.outputs.latest) || '' }}
+          TAG: ${{ needs.meta.outputs.tag }}
+          LATEST: ${{ needs.meta.outputs.latest }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          tags="${REGISTRY}/${REPO}:${TAG}-${ARCH}"
+          if [ -n "${LATEST}" ]; then
+            tags="${tags},${REGISTRY}/${REPO}:${LATEST}-${ARCH}"
+          fi
+          echo "tags=$tags" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
         with:
-          files: docker-bake.hcl
-          set: |
-            *.cache-from=type=gha
-            *.cache-to=type=gha,mode=max
+          context: .
+          platforms: ${{ matrix.platform }}
           push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  manifest:
+    needs: [meta, build]
+    if: needs.meta.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create multi-arch manifest
+        env:
+          REGISTRY: ghcr.io
+          REPO: ${{ github.repository }}
+          TAG: ${{ needs.meta.outputs.tag }}
+          LATEST: ${{ needs.meta.outputs.latest }}
+        run: |
+          docker buildx imagetools create \
+            -t "${REGISTRY}/${REPO}:${TAG}" \
+            "${REGISTRY}/${REPO}:${TAG}-amd64" \
+            "${REGISTRY}/${REPO}:${TAG}-arm64"
+
+          if [ -n "${LATEST}" ]; then
+            docker buildx imagetools create \
+              -t "${REGISTRY}/${REPO}:${LATEST}" \
+              "${REGISTRY}/${REPO}:${LATEST}-amd64" \
+              "${REGISTRY}/${REPO}:${LATEST}-arm64"
+          fi
