@@ -2,17 +2,19 @@
 set -euo pipefail
 
 if [ $# -lt 1 ]; then
-  echo "usage: $0 <version> [--push]" >&2
+  echo "usage: $0 <vX.Y.Z> [--push]" >&2
   exit 1
 fi
 
-version="$1"
+raw_version="$1"
 shift || true
 
-if ! echo "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-  echo "version must be like 0.2.0" >&2
+if ! echo "$raw_version" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+  echo "version must be like v0.2.0" >&2
   exit 1
 fi
+
+version="${raw_version#v}"
 
 if ! git diff --quiet || ! git diff --cached --quiet; then
   echo "working tree is dirty; commit or stash changes first" >&2
