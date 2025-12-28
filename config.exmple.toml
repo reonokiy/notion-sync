@@ -11,21 +11,20 @@ max_age_seconds = 300
 # redis_url = "redis://localhost:6379"
 # name = "notion-sync"
 
-[key_map]
-# "Name" = "title"
-# "Tags" = "tags"
-# "Published" = "published"
-
 [[database]]
 id = "xxxxxxxxxxxxxxxx"
 [[database.storage]]
 type = "fs"
 root = "/tmp/db1"
 
-[database.key_map]
-# "Name" = "title"
-# "Tags" = "tags"
-# "Published" = "published"
+[database.properties.map]
+# "名称" = "title"
+# "创建时间" = "created_at"
+# "发布时间" = "published_at"
+# "研究领域" = "tags"
+# "网址" = "url"
+[database.properties.filter]
+# includes = ["名称", "创建时间", "发布时间", "研究领域", "网址"]
 
 # [[database]]
 # id = "yyyyyyyyyyyyyyyy"

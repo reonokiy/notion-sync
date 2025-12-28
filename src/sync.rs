@@ -44,7 +44,12 @@ pub async fn sync_page(state: &AppState, database: &DatabaseState, page_id: &str
         .fetch_blocks(page_id, state.max_depth)
         .await
         .with_context(|| format!("failed to fetch blocks for {page_id}"))?;
-    let rendered = render_page(&metadata, &blocks, &database.key_map);
+    let rendered = render_page(
+        &metadata,
+        &blocks,
+        &database.property_map,
+        database.property_includes.as_ref(),
+    );
     let page_path = format!("pages/{}.md", page_id);
     database
         .op

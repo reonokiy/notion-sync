@@ -70,6 +70,22 @@ pub struct DatabaseConfig {
     pub storage: Vec<BackendConfig>,
     #[serde(default)]
     pub key_map: BTreeMap<String, String>,
+    #[serde(default)]
+    pub properties: DatabasePropertiesConfig,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct DatabasePropertiesConfig {
+    #[serde(default)]
+    pub map: BTreeMap<String, String>,
+    #[serde(default)]
+    pub filter: PropertyFilterConfig,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct PropertyFilterConfig {
+    #[serde(default)]
+    pub includes: Option<Vec<String>>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

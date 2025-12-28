@@ -1,5 +1,5 @@
 use crate::notion::{Block, FileContainer, PageMetadata, PropertyValue, RichText, RichTextContainer};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 pub struct Rendered {
     pub markdown: String,
@@ -16,6 +16,7 @@ pub fn render_page(
     metadata: &PageMetadata,
     blocks: &[Block],
     key_map: &BTreeMap<String, String>,
+    property_includes: Option<&HashSet<String>>,
 ) -> Rendered {
     let mut out = String::new();
     let mut numbering = 1usize;
@@ -24,6 +25,11 @@ pub fn render_page(
 
     out.push_str("---\n");
     for (key, value) in &metadata.properties {
+        if let Some(includes) = property_includes {
+            if !includes.contains(key) {
+                continue;
+            }
+        }
         let mapped_key = key_map.get(key).map(|v| v.as_str()).unwrap_or(key);
         if mapped_key.is_empty() {
             continue;

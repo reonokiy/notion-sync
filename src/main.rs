@@ -4,6 +4,7 @@ use tokio::net::TcpListener;
 use log::info;
 use logforth::append;
 use logforth::record::{Level, LevelFilter};
+use std::collections::HashSet;
 
 const DEFAULT_MAX_DEPTH: usize = 3;
 
@@ -37,7 +38,8 @@ pub struct DatabaseState {
     pub id: String,
     pub op: opendal::Operator,
     pub data_sources: Vec<DataSourceInfo>,
-    pub key_map: std::collections::BTreeMap<String, String>,
+    pub property_map: std::collections::BTreeMap<String, String>,
+    pub property_includes: Option<HashSet<String>>,
 }
 
 #[tokio::main]
@@ -60,11 +62,23 @@ async fn main() -> Result<()> {
             .ok_or_else(|| anyhow::anyhow!("database {} has no storage", db.id))?;
         let op = init_opendal(backend)?;
         let data_sources = notion.fetch_database_data_sources(&db.id).await?;
+        let property_map = if db.properties.map.is_empty() {
+            db.key_map.clone()
+        } else {
+            db.properties.map.clone()
+        };
+        let property_includes = db
+            .properties
+            .filter
+            .includes
+            .as_ref()
+            .map(|items| items.iter().cloned().collect());
         databases.push(DatabaseState {
             id: db.id.clone(),
             op,
             data_sources,
-            key_map: db.key_map.clone(),
+            property_map,
+            property_includes,
         });
     }
     info!("databases initialized");
