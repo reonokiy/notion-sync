@@ -1,4 +1,5 @@
 use crate::notion::{Block, FileContainer, PageMetadata, PropertyValue, RichText, RichTextContainer};
+use serde_yaml::{Mapping, Value as YamlValue};
 use std::collections::{BTreeMap, HashSet};
 
 pub struct Rendered {
@@ -23,7 +24,19 @@ pub fn render_page(
     let mut table_state: Option<TableState> = None;
     let mut blobs: Vec<BlobRef> = Vec::new();
 
-    out.push_str("---\n");
+    let mut front_matter = Mapping::new();
+    let mut notion_meta = Mapping::new();
+    notion_meta.insert(
+        YamlValue::String("page_id".to_string()),
+        YamlValue::String(metadata.id.clone()),
+    );
+    if let Some(database_id) = metadata.parent.database_id.as_ref() {
+        notion_meta.insert(
+            YamlValue::String("database_id".to_string()),
+            YamlValue::String(database_id.clone()),
+        );
+    }
+    front_matter.insert(YamlValue::String("_notion".to_string()), YamlValue::Mapping(notion_meta));
     for (key, value) in &metadata.properties {
         if let Some(includes) = property_includes {
             if !includes.contains(key) {
@@ -34,28 +47,23 @@ pub fn render_page(
         if mapped_key.is_empty() {
             continue;
         }
-        out.push('"');
-        out.push_str(&escape_yaml(mapped_key));
-        out.push_str("\": ");
-        match value {
-            PropertyValue::Text(value) => {
-                out.push('"');
-                out.push_str(&escape_yaml(value));
-                out.push_str("\"\n");
-            }
-            PropertyValue::List(values) => {
-                out.push('[');
-                for (index, item) in values.iter().enumerate() {
-                    if index > 0 {
-                        out.push_str(", ");
-                    }
-                    out.push('"');
-                    out.push_str(&escape_yaml(item));
-                    out.push('"');
-                }
-                out.push_str("]\n");
-            }
-        }
+        let yaml_value = match value {
+            PropertyValue::Text(value) => YamlValue::String(value.clone()),
+            PropertyValue::List(values) => YamlValue::Sequence(
+                values
+                    .iter()
+                    .map(|item| YamlValue::String(item.clone()))
+                    .collect(),
+            ),
+        };
+        front_matter.insert(YamlValue::String(mapped_key.to_string()), yaml_value);
+    }
+    let yaml = serde_yaml::to_string(&front_matter).unwrap_or_default();
+    let yaml = yaml.strip_prefix("---\n").unwrap_or(&yaml);
+    out.push_str("---\n");
+    out.push_str(yaml);
+    if !yaml.ends_with('\n') {
+        out.push('\n');
     }
     out.push_str("---\n\n");
 
@@ -401,10 +409,6 @@ fn extract_extension_from_url(url: &str) -> Option<String> {
 
 fn format_blob_link(path: &str) -> String {
     format!("../{}", path)
-}
-
-fn escape_yaml(value: &str) -> String {
-    value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 fn flush_table(out: &mut String, state: Option<TableState>) {
