@@ -12,8 +12,7 @@ use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 use log::{error, info};
 
-use crate::queue::SyncJob;
-use crate::AppState;
+use crate::{sync, AppState};
 
 pub async fn handle_webhook(
     State(state): State<AppState>,
@@ -57,10 +56,12 @@ pub async fn handle_webhook(
     }
 
     if let Some(page_id) = extract_page_id(&payload) {
-        let _ = state
-            .queue
-            .enqueue(SyncJob::SyncPageById { page_id })
-            .await;
+        let state = state.clone();
+        tokio::spawn(async move {
+            if let Err(err) = sync::sync_page_by_id(&state, &page_id).await {
+                error!("page sync failed {}: {err}", page_id);
+            }
+        });
         return StatusCode::OK.into_response();
     }
 
@@ -72,13 +73,13 @@ pub async fn handle_webhook(
             info!("data source {} not configured, skipping", data_source_id);
             return StatusCode::OK.into_response();
         };
-        let _ = state
-            .queue
-            .enqueue(SyncJob::ScanDataSource {
-                database_id: database.id.clone(),
-                data_source_id,
-            })
-            .await;
+        let state = state.clone();
+        let database = database.clone();
+        tokio::spawn(async move {
+            if let Err(err) = sync::scan_data_source(&state, &database, &data_source_id).await {
+                error!("data source scan failed {}: {err}", data_source_id);
+            }
+        });
         return StatusCode::OK.into_response();
     }
 
@@ -88,15 +89,13 @@ pub async fn handle_webhook(
             info!("database {} not configured, skipping", database_id);
             return StatusCode::OK.into_response();
         };
-        for data_source in &database.data_sources {
-            let _ = state
-                .queue
-                .enqueue(SyncJob::ScanDataSource {
-                    database_id: database.id.clone(),
-                    data_source_id: data_source.id.clone(),
-                })
-                .await;
-        }
+        let state = state.clone();
+        let database = database.clone();
+        tokio::spawn(async move {
+            if let Err(err) = sync::scan_database(&state, &database).await {
+                error!("database scan failed {}: {err}", database.id);
+            }
+        });
         return StatusCode::OK.into_response();
     }
 

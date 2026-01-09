@@ -1,10 +1,51 @@
 use anyhow::{Context, Result};
 use std::collections::HashSet;
 
-use log::info;
+use log::{info, warn};
 
 use crate::render::{render_page, BlobRef};
 use crate::{AppState, DatabaseState};
+
+pub async fn sync_all(state: &AppState) -> Result<()> {
+    for database in &state.databases {
+        if let Err(err) = scan_database(state, database).await {
+            warn!("scan failed for database {}: {err}", database.id);
+        }
+    }
+    Ok(())
+}
+
+pub async fn scan_database(state: &AppState, database: &DatabaseState) -> Result<()> {
+    for data_source in &database.data_sources {
+        if let Err(err) = scan_data_source(state, database, &data_source.id).await {
+            warn!(
+                "scan failed for data source {} (db {}): {err}",
+                data_source.id, database.id
+            );
+        }
+    }
+    Ok(())
+}
+
+pub async fn scan_data_source(
+    state: &AppState,
+    database: &DatabaseState,
+    data_source_id: &str,
+) -> Result<()> {
+    let page_ids = state.notion.query_data_source_page_ids(data_source_id).await?;
+    info!(
+        "found {} pages for data source {} (db {})",
+        page_ids.len(),
+        data_source_id,
+        database.id
+    );
+    for page_id in page_ids {
+        if let Err(err) = sync_page(state, database, &page_id).await {
+            warn!("page sync failed {} (db {}): {err}", page_id, database.id);
+        }
+    }
+    Ok(())
+}
 
 pub async fn sync_page_by_id(state: &AppState, page_id: &str) -> Result<()> {
     let parent = state

@@ -13,7 +13,7 @@ pub struct AppConfig {
     #[serde(default)]
     pub webhook: WebhookConfig,
     #[serde(default)]
-    pub queue: QueueConfig,
+    pub sync: SyncConfig,
     #[serde(default)]
     pub database: Vec<DatabaseConfig>,
 }
@@ -47,18 +47,15 @@ impl Default for WebhookConfig {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct QueueConfig {
-    #[serde(default)]
-    pub redis_url: Option<String>,
-    #[serde(default = "default_queue_name")]
-    pub name: String,
+pub struct SyncConfig {
+    #[serde(default = "default_sync_interval_seconds")]
+    pub interval_seconds: u64,
 }
 
-impl Default for QueueConfig {
+impl Default for SyncConfig {
     fn default() -> Self {
         Self {
-            redis_url: None,
-            name: default_queue_name(),
+            interval_seconds: default_sync_interval_seconds(),
         }
     }
 }
@@ -152,6 +149,6 @@ fn default_webhook_max_age_seconds() -> u64 {
     300
 }
 
-fn default_queue_name() -> String {
-    "notion-sync".to_string()
+fn default_sync_interval_seconds() -> u64 {
+    86400
 }
