@@ -3,6 +3,7 @@ use axum::{routing::{get, post}, Router};
 use tokio::net::TcpListener;
 use log::info;
 use logforth::append;
+use logforth::layout::TextLayout;
 use logforth::record::{Level, LevelFilter};
 use std::collections::HashSet;
 
@@ -114,11 +115,11 @@ fn init_logging() {
     logforth::starter_log::builder()
         .dispatch(|d| {
             d.filter(LevelFilter::MoreSevereEqual(Level::Error))
-                .append(append::Stderr::default())
+                .append(append::Stderr::default().with_layout(TextLayout::default()))
         })
         .dispatch(|d| {
             d.filter(LevelFilter::MoreSevereEqual(Level::Info))
-                .append(append::Stdout::default())
+                .append(append::Stdout::default().with_layout(TextLayout::default()))
         })
         .apply();
 }
