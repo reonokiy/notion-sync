@@ -56,8 +56,7 @@ pub async fn handle_webhook(
     }
 
     if let Some(page_id) = extract_page_id(&payload) {
-        let state = state.clone();
-        tokio::spawn(async move {
+        spawn_sync(&state, move |state| async move {
             if let Err(err) = sync::sync_page_by_id(&state, &page_id).await {
                 error!("page sync failed {}: {err}", page_id);
             }
@@ -73,9 +72,8 @@ pub async fn handle_webhook(
             info!("data source {} not configured, skipping", data_source_id);
             return StatusCode::OK.into_response();
         };
-        let state = state.clone();
         let database = database.clone();
-        tokio::spawn(async move {
+        spawn_sync(&state, move |state| async move {
             if let Err(err) = sync::scan_data_source(&state, &database, &data_source_id).await {
                 error!("data source scan failed {}: {err}", data_source_id);
             }
@@ -89,9 +87,8 @@ pub async fn handle_webhook(
             info!("database {} not configured, skipping", database_id);
             return StatusCode::OK.into_response();
         };
-        let state = state.clone();
         let database = database.clone();
-        tokio::spawn(async move {
+        spawn_sync(&state, move |state| async move {
             if let Err(err) = sync::scan_database(&state, &database).await {
                 error!("database scan failed {}: {err}", database.id);
             }
@@ -112,6 +109,15 @@ fn extract_page_id(payload: &Value) -> Option<String> {
         .and_then(|data| data.get("id"))
         .and_then(|id| id.as_str())
         .map(|value| value.to_string())
+}
+
+fn spawn_sync<F, Fut>(state: &AppState, handler: F)
+where
+    F: FnOnce(AppState) -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = ()> + Send + 'static,
+{
+    let state = state.clone();
+    tokio::spawn(handler(state));
 }
 
 fn extract_database_id(payload: &Value) -> Option<String> {

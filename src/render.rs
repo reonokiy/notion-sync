@@ -38,10 +38,8 @@ pub fn render_page(
     }
     front_matter.insert(YamlValue::String("_notion".to_string()), YamlValue::Mapping(notion_meta));
     for (key, value) in &metadata.properties {
-        if let Some(includes) = property_includes {
-            if !includes.contains(key) {
-                continue;
-            }
+        if let Some(includes) = property_includes && !includes.contains(key) {
+            continue;
         }
         let mapped_key = key_map.get(key).map(|v| v.as_str()).unwrap_or(key);
         if mapped_key.is_empty() {
